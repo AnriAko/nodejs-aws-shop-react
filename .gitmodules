@@ -1,0 +1,3 @@
+[submodule "backend"]
+	path = backend
+	url = git@github.com:AnriAko/nodejs-aws-backend-task.git
