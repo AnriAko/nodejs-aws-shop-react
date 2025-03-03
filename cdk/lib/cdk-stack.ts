@@ -3,6 +3,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { RemovalPolicy } from "aws-cdk-lib";
 
 const DIST_DIR_LOCATION: string = "../dist";
@@ -15,18 +16,35 @@ export class WebsiteStack extends cdk.Stack {
             removalPolicy: RemovalPolicy.DESTROY,
             autoDeleteObjects: true,
             blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-            websiteIndexDocument: "index.html",
-            websiteErrorDocument: "index.html",
         });
 
-        cdk.Tags.of(websiteBucket).add(
-            "Description",
-            "Bucket for RsSchool static website"
+        // Create Origin Access Identity
+        const cloudfrontOAI = new cloudfront.OriginAccessIdentity(
+            this,
+            "CloudFrontOAI",
+            {
+                comment: "OAI for website content",
+            }
+        );
+
+        // Grant read permissions to CloudFront
+        websiteBucket.addToResourcePolicy(
+            new iam.PolicyStatement({
+                actions: ["s3:GetObject"],
+                resources: [websiteBucket.arnForObjects("*")],
+                principals: [
+                    new iam.CanonicalUserPrincipal(
+                        cloudfrontOAI.cloudFrontOriginAccessIdentityS3CanonicalUserId
+                    ),
+                ],
+            })
         );
 
         const distribution = new cloudfront.Distribution(this, "Distribution", {
             defaultBehavior: {
-                origin: new origins.S3StaticWebsiteOrigin(websiteBucket),
+                origin: new origins.S3Origin(websiteBucket, {
+                    originAccessIdentity: cloudfrontOAI,
+                }),
                 viewerProtocolPolicy:
                     cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
@@ -39,15 +57,9 @@ export class WebsiteStack extends cdk.Stack {
                     responsePagePath: "/index.html",
                 },
             ],
-            comment: "CloudFront distribution for RsSchool static website",
         });
 
-        cdk.Tags.of(distribution).add(
-            "Description",
-            "Distribution for RsSchool static website"
-        );
-
-        new s3deploy.BucketDeployment(this, "WebsiteDeployment", {
+        new s3deploy.BucketDeployment(this, "S3BucketURL", {
             sources: [s3deploy.Source.asset(DIST_DIR_LOCATION)],
             destinationBucket: websiteBucket,
             distribution: distribution,
@@ -57,11 +69,6 @@ export class WebsiteStack extends cdk.Stack {
         new cdk.CfnOutput(this, "DistributionDomainName", {
             value: distribution.distributionDomainName,
             description: "CloudFront distribution URL",
-        });
-
-        new cdk.CfnOutput(this, "S3BucketURL", {
-            value: websiteBucket.bucketWebsiteUrl,
-            description: "S3 Bucket Website URL (Access restricted)",
         });
     }
 }
